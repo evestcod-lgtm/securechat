@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>SecureChat</title>
+<link rel="stylesheet" href="style.css">
+<!-- socket.io грузим с CDN — в APK нет своего сервера, откуда брать локальный /socket.io/socket.io.js -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<!-- config.js: сюда CI подставляет Xirsys ICE-сервера при сборке APK (см. .github/workflows/build-apk.yml) -->
+<script src="config.js"></script>
+</head>
+<body>
+<audio id="snd-ringtone" loop playsinline></audio>
+<audio id="snd-notif" playsinline></audio>
+<div id="toasts"></div>
+
+<!-- ЭКРАН ВХОДА -->
+<div id="login-screen" class="screen active">
+  <div class="auth-box">
+    <div class="auth-head">
+      <span class="auth-logo">🔐</span>
+      <h1>SecureChat</h1>
+      <p>Конфиденциальный мессенджер</p>
+    </div>
+    <div class="auth-tabs">
+      <button class="tab active" onclick="switchTab('login')">Вход</button>
+      <button class="tab" onclick="switchTab('reg')">Регистрация</button>
+    </div>
+    <div id="tab-login">
+      <div class="field"><label>Логин</label><input id="l-user" type="text" placeholder="юзернейм" autocomplete="off"></div>
+      <div class="field"><label>Пароль</label><input id="l-pass" type="password" placeholder="пароль"></div>
+      <button class="btn-prim" onclick="doLogin()">Войти →</button>
+    </div>
+    <div id="tab-reg" class="hidden">
+      <div class="field"><label>Логин</label><input id="r-user" type="text" placeholder="a-z,0-9,_ (3-20)" autocomplete="off"><small>Только латинские буквы, цифры, _</small></div>
+      <div class="field"><label>Пароль</label><input id="r-pass" type="password" placeholder="минимум 4 символа"></div>
+      <div class="field"><label>Подтверждение</label><input id="r-pass2" type="password" placeholder="повторите пароль"></div>
+      <button class="btn-prim" onclick="doRegister()">Создать аккаунт →</button>
+    </div>
+    <p class="auth-note">🛡️ Сообщения шифруются на сервере</p>
+  </div>
+</div>
+
+<!-- ОСНОВНОЙ ЭКРАН -->
+<div id="app-screen" class="screen">
+  <div class="sidebar" id="sidebar">
+    <div class="profile-bar">
+      <div class="avatar" id="my-ava" onclick="openSettings()"></div>
+      <div class="profile-bar-info">
+        <b id="my-dname">—</b>
+        <span id="my-uname">@—</span>
+      </div>
+      <button id="admin-btn" class="ico-btn" onclick="openAdmin()" style="display:none" title="Админ">👑</button>
+      <button class="ico-btn" onclick="openSettings()" title="Настройки">⚙️</button>
+    </div>
+    <div class="search-bar">
+      <input id="search-inp" placeholder="🔍 Поиск по юзернейму..." autocomplete="off">
+      <button class="search-btn" onclick="doSearch()">Найти</button>
+    </div>
+    <div id="search-res"></div>
+    <div class="section-label">Сообщения</div>
+    <div id="chat-list"></div>
+    <div class="section-label" style="margin-top:6px">Группы</div>
+    <div id="group-list"></div>
+    <button class="create-group-btn" onclick="openCreateGroup()">＋ Создать группу</button>
+  </div>
+  <div class="resizer" id="resizer"></div>
+  <div class="chat-area" id="chat-area">
+    <div class="chat-header">
+      <button class="back-btn" onclick="closeMobile()">←</button>
+      <div class="avatar sm" id="ch-ava" style="display:none" onclick="openPeerProfile()"></div>
+      <div class="ch-info" onclick="openPeerProfile()" style="cursor:pointer">
+        <b id="ch-title">Выберите чат</b>
+        <span id="ch-sub">Выберите контакт слева</span>
+      </div>
+      <div class="ch-actions">
+        <button id="btn-vcall" class="ico-btn" onclick="startCall(null,true)" style="display:none" title="Видеозвонок">📹</button>
+        <button id="btn-acall" class="ico-btn" onclick="startCall(null,false)" style="display:none" title="Голосовой звонок">📞</button>
+        <button id="btn-menu" class="ico-btn" onclick="toggleChatMenu()" style="display:none" title="Меню">⋯</button>
+      </div>
+    </div>
+    <!-- Меню чата (3 точки) -->
+    <div id="chat-menu" class="chat-menu hidden">
+      <button onclick="menuProfile()">👤 Профиль</button>
+      <button onclick="menuClear()">🧹 Очистить чат</button>
+      <button onclick="menuDelete()">🗑️ Удалить чат</button>
+    </div>
+    <div class="msgs" id="msgs"></div>
+    <div id="reply-bar" class="reply-bar hidden">
+      <div><span class="reply-label">↪️ Ответ</span><span id="reply-txt"></span></div>
+      <button onclick="cancelReply()">✕</button>
+    </div>
+    <div class="input-bar" id="input-bar" style="display:none">
+      <button class="ico-btn" onclick="document.getElementById('file-inp').click()" title="Фото/видео">📎</button>
+      <input type="file" id="file-inp" accept="image/*,video/*" style="display:none" onchange="handleFile()">
+      <input class="msg-inp" id="msg-inp" placeholder="Сообщение..." autocomplete="off">
+      <button class="send-btn" onclick="sendMsg()">➤</button>
+    </div>
+  </div>
+</div>
+
+<!-- ПРОСМОТР МЕДИА НА ВЕСЬ ЭКРАН -->
+<div id="media-fs" class="fs-overlay hidden">
+  <button class="fs-back" onclick="closeFS()">←</button>
+  <div class="fs-content">
+    <img id="fs-img" class="hidden">
+    <video id="fs-vid" class="hidden" controls playsinline></video>
+  </div>
+  <div id="fs-compose" class="fs-compose hidden">
+    <input id="fs-caption" placeholder="Подпись (необязательно)" autocomplete="off">
+    <button class="send-btn" onclick="confirmSend()">➤</button>
+  </div>
+</div>
+
+<!-- ЗВОНОК -->
+<div id="call-overlay" class="call-overlay hidden">
+  <div class="call-box">
+    <p class="call-status" id="call-status">Звонок...</p>
+    <div id="call-video-box" class="call-video-box hidden">
+      <video id="remote-vid" autoplay playsinline></video>
+      <video id="local-vid" autoplay playsinline muted></video>
+    </div>
+    <div class="call-wave" id="call-wave">
+      <div class="avatar lg" id="call-ava">?</div>
+    </div>
+    <p class="call-name" id="call-name">—</p>
+    <p class="call-login" id="call-login">—</p>
+    <p class="call-timer hidden" id="call-timer">00:00</p>
+    <div class="call-btns">
+      <button id="btn-accept" class="call-circle accept" onclick="acceptCall()" style="display:none" title="Принять"></button>
+      <button id="btn-end" class="call-circle decline" onclick="endCall()" title="Завершить"></button>
+    </div>
+    <div class="call-btns2">
+      <button id="btn-mic" class="call-circle toggle on" onclick="toggleMic()" title="Микрофон">🎤</button>
+      <button id="btn-spk" class="call-circle toggle on" onclick="toggleSpeaker()" title="Громкая связь">🔊</button>
+      <button id="btn-vid-tog" class="call-circle toggle on" onclick="toggleVideo()" title="Камера" style="display:none">📷</button>
+    </div>
+    <audio id="remote-aud" autoplay playsinline style="display:none"></audio>
+  </div>
+</div>
+
+<!-- ПРОФИЛЬ СОБЕСЕДНИКА -->
+<div id="modal-peer" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h2>👤 Профиль</h2><button onclick="closePeerProfile()">✕</button></div>
+    <div class="modal-body" style="align-items:center">
+      <div class="avatar lg" id="peer-modal-ava" style="margin:0 auto"></div>
+      <div style="text-align:center;margin-top:12px">
+        <h2 id="peer-modal-dname" style="font-size:22px;font-weight:800"></h2>
+        <p id="peer-modal-uname" style="color:var(--fg2);font-size:14px;margin-top:4px"></p>
+      </div>
+      <p id="peer-modal-bio" style="text-align:center;color:var(--fg1);font-size:14px;line-height:1.5;margin-top:6px"></p>
+      <div id="peer-modal-info" style="width:100%;display:flex;flex-direction:column;gap:8px;margin-top:10px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-prim" onclick="closePeerProfile()">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- НАСТРОЙКИ -->
+<div id="modal-settings" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h2>⚙️ Настройки</h2><button onclick="closeSettings()">✕</button></div>
+    <div class="modal-body">
+      <section>
+        <h3>👤 Профиль</h3>
+        <label class="file-label" for="inp-ava">📷 Выбрать фото профиля</label>
+        <input type="file" id="inp-ava" accept="image/*" class="fhide" onchange="previewAva()">
+        <div id="ava-preview-wrap" style="display:none;text-align:center;margin:8px 0">
+          <div class="avatar lg" id="ava-preview" style="margin:0 auto"></div>
+          <small style="color:var(--fg2)">Предпросмотр — нажмите «Сохранить»</small>
+        </div>
+        <div class="field"><label>Отображаемое имя</label><input id="inp-dname" class="inp" placeholder="Ваше имя"></div>
+        <div class="field"><label>Юзернейм (логин)</label><input id="inp-uname" class="inp" placeholder="a-z,0-9,_"></div>
+        <div class="field"><label>О себе (описание)</label><textarea id="inp-bio" class="inp" rows="3" placeholder="Расскажите о себе..."></textarea></div>
+        <div class="field"><label>Новый пароль</label><input id="inp-pass" type="password" class="inp" placeholder="Оставьте пустым — не меняется"></div>
+      </section>
+      <section>
+        <h3>🔒 Конфиденциальность</h3>
+        <div class="toggle-row"><span>Скрыть онлайн-статус</span><label class="switch"><input type="checkbox" id="sw-hide-online" onchange="savePrivacy()"><span class="sw-track"></span></label></div>
+        <div class="toggle-row"><span>Скрыть дату регистрации</span><label class="switch"><input type="checkbox" id="sw-hide-created" onchange="savePrivacy()"><span class="sw-track"></span></label></div>
+      </section>
+      <section>
+        <h3>🎨 Тема</h3>
+        <div class="theme-grid">
+          <button class="theme-btn" onclick="setTheme('dark')" data-theme="dark">🌑 Тёмная</button>
+          <button class="theme-btn" onclick="setTheme('light')" data-theme="light">☀️ Светлая</button>
+          <button class="theme-btn" onclick="setTheme('purple')" data-theme="purple">💜 Фиолет</button>
+          <button class="theme-btn" onclick="setTheme('ocean')" data-theme="ocean">🌊 Океан</button>
+          <button class="theme-btn" onclick="setTheme('forest')" data-theme="forest">🌲 Лес</button>
+          <button class="theme-btn" onclick="setTheme('midnight')" data-theme="midnight">🌃 Полночь</button>
+        </div>
+      </section>
+      <section>
+        <h3>🔔 Звуки</h3>
+        <div class="toggle-row"><span>Звук уведомлений</span><label class="switch"><input type="checkbox" id="sw-sound" onchange="savePref()"><span class="sw-track"></span></label></div>
+        <div class="toggle-row"><span>Вибрация</span><label class="switch"><input type="checkbox" id="sw-vib" onchange="savePref()"><span class="sw-track"></span></label></div>
+        <label class="file-label" for="inp-ring">🎵 Рингтон (сохраняется)</label>
+        <input type="file" id="inp-ring" accept="audio/*" class="fhide" onchange="saveRingtone()">
+        <label class="file-label" for="inp-notif">🔔 Звук уведомления (сохраняется)</label>
+        <input type="file" id="inp-notif" accept="audio/*" class="fhide" onchange="saveNotifSound()">
+      </section>
+      <section>
+        <h3>🔐 Безопасность</h3>
+        <p style="font-size:12px;color:var(--fg2);margin-bottom:8px">Активные сессии:</p>
+        <div id="devices-list"></div>
+      </section>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-prim" onclick="saveProfile()">💾 Сохранить</button>
+      <button class="btn-sec" onclick="doLogout()">🚪 Выйти</button>
+    </div>
+  </div>
+</div>
+
+<!-- СОЗДАТЬ ГРУППУ -->
+<div id="modal-group" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h2>👥 Новая группа</h2><button onclick="closeCreateGroup()">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Название группы</label><input id="grp-name" class="inp" placeholder="Название..."></div>
+      <div class="field"><label>Участники (юзернеймы через запятую)</label><input id="grp-members" class="inp" placeholder="user1, user2, ..."></div>
+    </div>
+    <div class="modal-foot"><button class="btn-prim" onclick="createGroup()">Создать</button></div>
+  </div>
+</div>
+
+<!-- АДМИН-ПАНЕЛЬ -->
+<div id="modal-admin" class="modal hidden">
+  <div class="modal-box wide">
+    <div class="modal-head"><h2>👑 Админ-панель</h2><button onclick="closeAdmin()">✕</button></div>
+    <div class="modal-body">
+      <section>
+        <h3>📊 Статистика</h3>
+        <div id="admin-stats" class="stat-grid"></div>
+      </section>
+      <section>
+        <h3>📢 Объявление всем</h3>
+        <textarea id="admin-bc" class="inp" rows="3" placeholder="Текст объявления..."></textarea>
+        <button class="btn-prim" style="margin-top:8px" onclick="adminBc()">Отправить</button>
+      </section>
+      <section>
+        <h3>🧹 Очистить чат</h3>
+        <div style="display:flex;gap:8px">
+          <input id="admin-clearchat-id" class="inp" placeholder="ID чата (например alice_bob)">
+          <button class="btn-sec" style="width:auto;padding:0 16px" onclick="adminClearChat()">Очистить</button>
+        </div>
+      </section>
+      <section>
+        <h3>🗑️ Группы</h3>
+        <div id="admin-groups-list"></div>
+      </section>
+      <section>
+        <h3>📋 Серверный лог</h3>
+        <button class="btn-sec" style="margin-bottom:8px;width:auto;padding:8px 16px" onclick="socket.emit('adminGetLog')">Обновить</button>
+        <div id="admin-log" class="admin-log"></div>
+      </section>
+      <section>
+        <h3>👥 Пользователи</h3>
+        <div id="admin-users"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

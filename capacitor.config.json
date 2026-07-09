@@ -1,0 +1,18 @@
+{
+  "appId": "com.oso.securechat",
+  "appName": "SecureChat",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_notify",
+      "iconColor": "#e53935",
+      "sound": "notif_sound.wav"
+    }
+  }
+}

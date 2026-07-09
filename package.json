@@ -1,0 +1,24 @@
+{
+  "name": "securechat",
+  "version": "3.1.0",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/cli": "^6.1.2",
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/local-notifications": "^6.1.0",
+    "@capacitor/app": "^6.0.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

@@ -1,0 +1,134 @@
+name: Build SecureChat APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install JS dependencies
+        run: npm install
+
+      # ─── Секреты репозитория (Settings → Secrets and variables → Actions → New repository secret) ───
+      #
+      # Xirsys (соответствуют полям в кабинете Xirsys один в один):
+      #   XIRSYS_API_KEY             = поле "API Key" в кабинете Xirsys
+      #   XIRSYS_CHANNEL_CREDENTIALS = поле "Channel Credentials" в кабинете Xirsys
+      #   XIRSYS_CHANNEL             = имя твоего канала (Channel), например "securechat"
+      #
+      # Адрес сервера (чтобы APK НИЧЕГО не спрашивал при первом запуске):
+      #   SERVER_URL = адрес твоего Termux-сервера, например http://100.x.x.x:3000 (Tailscale IP)
+      #                или https://xxxx.lhr.life (если используешь localhost.run)
+      #
+      # Ничего из этого никогда не попадает в открытом виде в git — подставляется только во время сборки.
+      - name: Inject Xirsys credentials + server URL into config.js
+        env:
+          XIRSYS_API_KEY: ${{ secrets.XIRSYS_API_KEY }}
+          XIRSYS_CHANNEL_CREDENTIALS: ${{ secrets.XIRSYS_CHANNEL_CREDENTIALS }}
+          XIRSYS_CHANNEL: ${{ secrets.XIRSYS_CHANNEL }}
+          SERVER_URL: ${{ secrets.SERVER_URL }}
+        run: |
+          ICE_JSON="[]"
+          if [ -n "$XIRSYS_API_KEY" ] && [ -n "$XIRSYS_CHANNEL_CREDENTIALS" ] && [ -n "$XIRSYS_CHANNEL" ]; then
+            echo "→ Запрашиваем ICE-сервера у Xirsys API"
+            RESPONSE=$(curl -s -u "$XIRSYS_API_KEY:$XIRSYS_CHANNEL_CREDENTIALS" \
+              -X PUT "https://global.xirsys.net/_turn/$XIRSYS_CHANNEL")
+            ICE_JSON=$(echo "$RESPONSE" | node -e "
+              let data='';
+              process.stdin.on('data', d => data += d);
+              process.stdin.on('end', () => {
+                try {
+                  const j = JSON.parse(data);
+                  console.log(JSON.stringify(j.v.iceServers));
+                } catch(e) {
+                  console.log('[]');
+                }
+              });
+            ")
+          else
+            echo '⚠️ Xirsys секреты не заданы — соберётся с бесплатным TURN (Open Relay) как запасным вариантом.'
+          fi
+
+          {
+            echo "window.XIRSYS_ICE = $ICE_JSON;"
+            echo "window.BAKED_SERVER_URL = '${SERVER_URL}';"
+          } > www/config.js
+
+          echo "✅ www/config.js сгенерирован:"
+          cat www/config.js
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Apply native patches (permissions, foreground service)
+        run: |
+          chmod +x patches/apply-android-patches.sh
+          ./patches/apply-android-patches.sh
+
+      # ─── Подпись APK: тоже секреты репозитория ───
+      #   KEYSTORE_BASE64   = твой .jks/.keystore файл, закодированный в base64 (см. README-BUILD.md)
+      #   KEYSTORE_PASSWORD = пароль хранилища ключей
+      #   KEY_ALIAS         = алиас ключа
+      #   KEY_PASSWORD      = пароль самого ключа
+      # Если не заданы — соберётся debug-APK (тоже устанавливается, просто без релизной подписи).
+      - name: Decode keystore (if provided)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
+            echo "HAS_KEYSTORE=true" >> $GITHUB_ENV
+          else
+            echo "HAS_KEYSTORE=false" >> $GITHUB_ENV
+          fi
+
+      - name: Build debug APK
+        if: env.HAS_KEYSTORE == 'false'
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Build & sign release APK
+        if: env.HAS_KEYSTORE == 'true'
+        working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=release.keystore \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecureChat-APK
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
