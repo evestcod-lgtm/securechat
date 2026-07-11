@@ -34,19 +34,19 @@ jobs:
       # Xirsys (соответствуют полям в кабинете Xirsys один в один):
       #   XIRSYS_API_KEY             = поле "API Key" в кабинете Xirsys
       #   XIRSYS_CHANNEL_CREDENTIALS = поле "Channel Credentials" в кабинете Xirsys
-      #   XIRSYS_CHANNEL             = имя твоего канала (Channel), например "securechat"
+      #   XIRSYS_CHANNEL             = имя твоего канала (Channel)
       #
-      # Адрес сервера (чтобы APK НИЧЕГО не спрашивал при первом запуске):
-      #   SERVER_URL = адрес твоего Termux-сервера, например http://100.x.x.x:3000 (Tailscale IP)
-      #                или https://xxxx.lhr.life (если используешь localhost.run)
+      # Адрес сервера СЕКРЕТОМ не задаётся — APK сам подтягивает актуальный
+      # адрес из patches/current-server-url.txt в этом репозитории при каждом
+      # запуске (см. www/boot.js). Этот файл Termux обновляет сам через
+      # GitHub API (см. patches/update-server-url.sh) — пересобирать APK не нужно.
       #
-      # Ничего из этого никогда не попадает в открытом виде в git — подставляется только во время сборки.
-      - name: Inject Xirsys credentials + server URL into config.js
+      # Ничего из секретов Xirsys никогда не попадает в открытом виде в git.
+      - name: Inject Xirsys credentials into config.js
         env:
           XIRSYS_API_KEY: ${{ secrets.XIRSYS_API_KEY }}
           XIRSYS_CHANNEL_CREDENTIALS: ${{ secrets.XIRSYS_CHANNEL_CREDENTIALS }}
           XIRSYS_CHANNEL: ${{ secrets.XIRSYS_CHANNEL }}
-          SERVER_URL: ${{ secrets.SERVER_URL }}
         run: |
           ICE_JSON="[]"
           if [ -n "$XIRSYS_API_KEY" ] && [ -n "$XIRSYS_CHANNEL_CREDENTIALS" ] && [ -n "$XIRSYS_CHANNEL" ]; then
@@ -69,11 +69,7 @@ jobs:
             echo '⚠️ Xirsys секреты не заданы — соберётся с бесплатным TURN (Open Relay) как запасным вариантом.'
           fi
 
-          {
-            echo "window.XIRSYS_ICE = $ICE_JSON;"
-            echo "window.BAKED_SERVER_URL = '${SERVER_URL}';"
-          } > www/config.js
-
+          echo "window.XIRSYS_ICE = $ICE_JSON;" > www/config.js
           echo "✅ www/config.js сгенерирован:"
           cat www/config.js
 

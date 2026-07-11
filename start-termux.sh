@@ -1,7 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Ручной запуск SecureChat в Termux (используй это сейчас, для теста —
-# после настройки Termux:Boot сервер будет включаться сам при перезагрузке,
-# см. README-BUILD.md раздел "Автозапуск").
+# Запуск SecureChat в Termux. Сервер и туннель — в отдельных фоновых процессах,
+# как при ручном запуске в двух сессиях (это оказалось стабильнее).
 #
 # Первый раз перед запуском:
 #   pkg update && pkg upgrade -y
@@ -13,7 +12,6 @@
 #   termux-wake-lock
 #   (плюс в настройках Android — отключи "оптимизацию батареи" для Termux)
 
-set -e
 cd "$(dirname "$0")"
 termux-wake-lock 2>/dev/null
 
@@ -21,27 +19,35 @@ APPDIR="$(pwd)"
 TUNNEL_LOG="$APPDIR/tunnel.log"
 
 echo "🔐 Запуск SecureChat сервера..."
-node server.js &
+nohup node server.js > "$APPDIR/server.log" 2>&1 &
 SERVER_PID=$!
 sleep 2
 
 echo "🌐 Открываю туннель (localhost.run)..."
 : > "$TUNNEL_LOG"
-ssh -R 80:localhost:3000 nokey@localhost.run 2>&1 | tee -a "$TUNNEL_LOG" &
+nohup ssh -R 80:localhost:3000 nokey@localhost.run > "$TUNNEL_LOG" 2>&1 &
 SSH_PID=$!
 
-# Ждём ссылку и сразу пушим её на GitHub
+# Ждём появления ссылки в логе (до 30 секунд)
+URL=""
 for i in $(seq 1 30); do
   URL=$(grep -oE 'https://[a-z0-9]+\.lhr\.life' "$TUNNEL_LOG" | head -n1)
   if [ -n "$URL" ]; then
-    echo ""
-    echo "✅ Твой адрес сервера: $URL"
-    bash "$APPDIR/patches/update-server-url.sh" "$URL"
     break
   fi
   sleep 1
 done
 
+if [ -n "$URL" ]; then
+  echo ""
+  echo "✅ Твой адрес сервера: $URL"
+  bash "$APPDIR/patches/update-server-url.sh" "$URL"
+else
+  echo ""
+  echo "⚠️ Ссылка пока не появилась, проверь вручную: cat $TUNNEL_LOG"
+fi
+
 echo ""
-echo "Сервер и туннель работают. Не закрывай Termux."
-wait $SERVER_PID $SSH_PID
+echo "Сервер (PID $SERVER_PID) и туннель (PID $SSH_PID) работают в фоне."
+echo "Можно закрывать сессию Termux — процессы продолжат работать (nohup)."
+echo "Логи: $APPDIR/server.log и $TUNNEL_LOG"
