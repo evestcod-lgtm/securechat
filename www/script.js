@@ -3,11 +3,10 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ─── АДРЕС СЕРВЕРА (Termux) ───
-// В APK нет "своего" сервера — грузим адрес, который ты вводишь в приложении
-// (Настройки → Адрес сервера). Хранится в localStorage, переживает обновления.
-// Для сайта (если открываешь просто в браузере с того же сервера) — оставляем пусто = same-origin.
+// К этому моменту index.html (загрузчик boot.js) уже определил актуальный
+// адрес сервера и положил его в window.RESOLVED_SERVER_URL — см. www/boot.js.
 const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-let SERVER_URL = localStorage.getItem('server_url') || window.BAKED_SERVER_URL || '';
+let SERVER_URL = window.RESOLVED_SERVER_URL || localStorage.getItem('server_url') || window.BAKED_SERVER_URL || '';
 const socket = io(SERVER_URL || undefined, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 1000, reconnectionAttempts: Infinity });
 
 // ─── СОСТОЯНИЕ ───
@@ -23,7 +22,10 @@ let speakerOn = true;
 let heartbeatInterval = null;
 
 // ─── ИНИЦИАЛИЗАЦИЯ ───
-window.onload = () => {
+// script.js теперь подгружается асинхронно из boot.js, поэтому событие
+// window.onload могло уже произойти к этому моменту — проверяем readyState,
+// а не просто вешаем window.onload (иначе инициализация может не запуститься).
+function initApp() {
   applyTheme(localStorage.getItem('theme') || 'dark');
   loadPrefsUI();
   initResizer();
@@ -33,19 +35,19 @@ window.onload = () => {
   requestAllPermissions();
   if (isNative && !SERVER_URL) {
     promptServerUrl();
-  } else if (isNative && SERVER_URL && !localStorage.getItem('server_url')) {
-    // Адрес зашит при сборке (Tailscale IP) — сохраняем его, чтобы можно было
-    // потом сменить вручную через changeServerUrl(), если понадобится.
-    localStorage.setItem('server_url', SERVER_URL);
-    if (me && myDevId) socket.emit('relogin', { username: me, oldDeviceId: myDevId });
   } else if (me && myDevId) {
     socket.emit('relogin', { username: me, oldDeviceId: myDevId });
   }
-};
+}
+if (document.readyState === 'complete') {
+  initApp();
+} else {
+  window.addEventListener('load', initApp);
+}
 
-// ─── АДРЕС СЕРВЕРА: экран настройки (только APK) ───
+// ─── АДРЕС СЕРВЕРА: запасной ручной ввод (если автопоиск через GitHub не сработал и сохранённого адреса нет) ───
 function promptServerUrl() {
-  const val = prompt('Адрес твоего сервера (Termux), например:\nhttp://100.x.x.x:3000  (Tailscale IP)\nили http://192.168.1.50:3000 (локальная сеть)');
+  const val = prompt('Не удалось определить адрес сервера автоматически.\nВведи адрес твоего сервера (Termux) вручную:');
   if (val && val.trim()) {
     localStorage.setItem('server_url', val.trim());
     location.reload();
