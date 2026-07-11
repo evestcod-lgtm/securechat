@@ -51,11 +51,11 @@ BODY=$(node -e "
 curl -s -X PUT "$API" \
   -H "Authorization: token $GITHUB_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "$BODY" > /tmp/gh-update-response.json
+  -d "$BODY" > "$HOME/gh-update-response.json"
 
-if grep -q '"content"' /tmp/gh-update-response.json; then
+if grep -q '"content"' "$HOME/gh-update-response.json"; then
   echo "✅ Адрес сервера обновлён на GitHub: $NEW_URL"
 else
   echo "⚠️ Не удалось обновить файл на GitHub, ответ:"
-  cat /tmp/gh-update-response.json
+  cat "$HOME/gh-update-response.json"
 fi

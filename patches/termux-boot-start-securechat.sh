@@ -27,7 +27,7 @@ sleep 3
 (
   while true; do
     : > "$TUNNEL_LOG"
-    ssh -R 80:localhost:3000 nokey@localhost.run >> "$TUNNEL_LOG" 2>&1 &
+    ssh -tt -R 80:localhost:3000 nokey@localhost.run >> "$TUNNEL_LOG" 2>&1 &
     SSH_PID=$!
 
     # Ждём появления ссылки в логе (до 30 секунд)
