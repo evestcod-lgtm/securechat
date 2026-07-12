@@ -46,5 +46,6 @@ fi
 mkdir -p "$JAVA_DIR"
 cp patches/MainActivity.java "$JAVA_DIR/MainActivity.java"
 cp patches/KeepAliveService.java "$JAVA_DIR/KeepAliveService.java"
+cp patches/CallPlugin.java "$JAVA_DIR/CallPlugin.java"
 
 echo "✅ Android-проект пропатчен (permissions + KeepAliveService + MainActivity)"

@@ -38,7 +38,9 @@ body[data-theme=midnight]{
   --ac:#818cf8;--ac2:#6366f1;--acl:#a5b4fc;--msg-peer:#0d1630;
   --msg-me:linear-gradient(135deg,#818cf8,#6366f1);
 }
-*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}
+*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;}
+button,a,.chat-item,.avatar,.tab,.theme-btn{-webkit-tap-highlight-color:transparent;outline:none;user-select:none;-webkit-user-select:none;}
+button:focus,input:focus,textarea:focus{outline:none;}
 html,body{width:100%;height:100%;}
 body{background:var(--bg0);color:var(--fg0);overflow:hidden;font-size:15px;}
 .screen{display:none;width:100%;height:100%;}
@@ -116,12 +118,16 @@ button{font-family:inherit;cursor:pointer;}
 .create-group-btn:hover{border-color:var(--ac);color:var(--fg0);}
 
 /* ═══ ЧАТ ═══ */
-.chat-area{flex:1;display:flex;flex-direction:column;background:var(--bg0);overflow:hidden;min-width:0;}
+.chat-area{flex:1;display:flex;flex-direction:column;background:var(--bg0);overflow:hidden;min-width:0;position:relative;}
 .chat-header{display:flex;align-items:center;gap:12px;padding:13px 20px;background:var(--bg1);border-bottom:1px solid var(--bg2);}
 .ch-info{flex:1;min-width:0;}
 .ch-info b{display:block;font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .ch-info span{font-size:12px;color:var(--fg2);}
 .ch-actions{display:flex;gap:8px;flex-shrink:0;}
+.chat-menu{position:absolute;top:56px;right:12px;z-index:50;background:var(--bg1);border:1px solid var(--bg3);border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:6px;display:flex;flex-direction:column;min-width:180px;overflow:hidden;}
+.chat-menu button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:11px 14px;background:transparent;border:none;border-radius:9px;color:var(--fg0);font-size:14px;cursor:pointer;transition:var(--tr);}
+.chat-menu button:hover,.chat-menu button:active{background:var(--bg2);}
+.chat-menu button:last-child{color:var(--err);}
 .back-btn{display:none;width:38px;height:38px;background:var(--bg2);border:none;border-radius:10px;color:var(--fg0);font-size:20px;align-items:center;justify-content:center;transition:var(--tr);flex-shrink:0;}
 .back-btn:hover{background:var(--ac);}
 
@@ -196,6 +202,9 @@ button{font-family:inherit;cursor:pointer;}
 .call-login{font-size:13px;color:var(--fg2);margin-bottom:6px;}
 .call-timer{font-size:15px;font-weight:700;color:var(--acl);letter-spacing:1px;margin-bottom:16px;}
 .call-btns{display:flex;justify-content:center;gap:28px;margin-bottom:18px;}
+.call-swipe-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;}
+.swipe-hint{font-size:11px;color:var(--fg2);opacity:.85;white-space:nowrap;pointer-events:none;animation:swipeHintBounce 1.4s ease-in-out infinite;}
+@keyframes swipeHintBounce{0%,100%{transform:translateY(0);}50%{transform:translateY(-4px);}}
 .call-btns2{display:flex;justify-content:center;gap:16px;}
 /* Кнопки звонка: ПРОСТО КРУГИ — никакого текста */
 .call-circle{border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:var(--tr);}
@@ -216,6 +225,9 @@ button{font-family:inherit;cursor:pointer;}
 /* ═══ МОДАЛКИ ═══ */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(8px);padding:16px;}
 .modal-box{width:100%;max-width:520px;max-height:90vh;background:var(--bg1);border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5);}
+.confirm-box{max-width:340px;}
+.spinner{width:34px;height:34px;border:3px solid var(--bg3);border-top-color:var(--ac);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
 .modal-box.wide{max-width:680px;}
 .modal-head{display:flex;justify-content:space-between;align-items:center;padding:20px 24px 16px;border-bottom:1px solid var(--bg2);}
 .modal-head h2{font-size:17px;font-weight:700;margin:0;}

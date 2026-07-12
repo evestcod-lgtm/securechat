@@ -30,12 +30,14 @@ function xor(str) {
   return out;
 }
 
-let db = { users: {}, messages: {}, activeChats: {}, groups: [] };
+let db = { users: {}, messages: {}, activeChats: {}, groups: [], settings: {} };
 if (fs.existsSync(DB)) {
   try { db = JSON.parse(fs.readFileSync(DB, 'utf8')); } catch(e) { console.error('DB read error:', e.message); }
 }
 if (!db.groups) db.groups = [];
 if (!db.activeChats) db.activeChats = {};
+if (!db.settings) db.settings = {};
+if (typeof db.settings.adminFindable !== 'boolean') db.settings.adminFindable = false;
 
 function save() {
   try { fs.writeFileSync(DB, JSON.stringify(db, null, 2)); } catch(e) { console.error('DB write error:', e.message); }
@@ -133,7 +135,7 @@ function sendInit(s) {
     }
 
     const usersList = Object.keys(db.users)
-      .filter(u => u !== ADMIN || s.username === ADMIN)
+      .filter(u => u !== ADMIN || s.username === ADMIN || db.settings.adminFindable)
       .map(u => {
         const user = db.users[u];
         const priv = user.privacy || {};
@@ -244,7 +246,7 @@ io.on('connection', (socket) => {
     const t = (q || '').toLowerCase().trim().replace('@', '');
     if (!t) return socket.emit('searchResult', []);
     const results = Object.keys(db.users)
-      .filter(u => u !== socket.username && (u !== ADMIN || socket.username === ADMIN))
+      .filter(u => u !== socket.username && (u !== ADMIN || socket.username === ADMIN || db.settings.adminFindable))
       .filter(u => u.includes(t) || (db.users[u].displayName || '').toLowerCase().includes(t))
       .sort((a, b) => (a.startsWith(t) ? 0 : 1) - (b.startsWith(t) ? 0 : 1) || a.localeCompare(b))
       .slice(0, 25)
@@ -544,6 +546,21 @@ io.on('connection', (socket) => {
     if (!isAdmin(socket) || !text) return;
     io.emit('adminAnnouncement', { text: text.trim(), time: new Date().toLocaleTimeString('ru-RU') });
     socket.emit('adminActionDone', '📢 Объявление отправлено всем');
+  });
+
+  // Переключатель: находить ли аккаунт admin в поиске у остальных пользователей.
+  // По умолчанию — не находить (скрыт из поиска для всех, кроме самого админа).
+  socket.on('adminSetFindable', (value) => {
+    if (!isAdmin(socket)) return;
+    db.settings.adminFindable = !!value;
+    save();
+    socket.emit('adminFindableState', db.settings.adminFindable);
+    socket.emit('adminActionDone', db.settings.adminFindable ? '🔎 Админ теперь находится в поиске' : '🙈 Админ скрыт из поиска');
+  });
+
+  socket.on('adminGetFindableState', () => {
+    if (!isAdmin(socket)) return;
+    socket.emit('adminFindableState', db.settings.adminFindable);
   });
 
   socket.on('adminClearChat', ({ chatId }) => {

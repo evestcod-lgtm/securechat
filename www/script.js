@@ -29,6 +29,7 @@ function initApp() {
   applyTheme(localStorage.getItem('theme') || 'dark');
   loadPrefsUI();
   initResizer();
+  initCallSwipeGestures();
   initAudio();
   unlockAudio();
   setupKeyboard();
@@ -36,8 +37,26 @@ function initApp() {
   if (isNative && !SERVER_URL) {
     promptServerUrl();
   } else if (me && myDevId) {
+    // Показываем "Вход в аккаунт..." вместо голой формы логина, пока идёт
+    // проверка сохранённой сессии на сервере — раньше тут была видна пустая
+    // форма несколько секунд, пока не придёт ответ сервера.
+    document.getElementById('auth-box-form').style.display = 'none';
+    document.getElementById('session-check-splash').classList.remove('hidden');
+    document.getElementById('session-check-splash').style.display = 'flex';
     socket.emit('relogin', { username: me, oldDeviceId: myDevId });
+    // Если за 8 секунд сервер не ответил (например, туннель ещё поднимается) —
+    // показываем обычную форму логина, чтобы не держать человека перед пустым экраном.
+    setTimeout(() => {
+      const splash = document.getElementById('session-check-splash');
+      if (splash && splash.style.display !== 'none') hideSessionSplash();
+    }, 8000);
   }
+}
+function hideSessionSplash() {
+  const splash = document.getElementById('session-check-splash');
+  const form = document.getElementById('auth-box-form');
+  if (splash) { splash.classList.add('hidden'); splash.style.display = 'none'; }
+  if (form) form.style.display = '';
 }
 if (document.readyState === 'complete') {
   initApp();
@@ -77,9 +96,43 @@ async function requestAllPermissions() {
 function initAudio() {
   const ring = document.getElementById('snd-ringtone');
   const notif = document.getElementById('snd-notif');
-  // Рингтон и звук уведомлений сохраняются в localStorage
-  if (ring) ring.src = localStorage.getItem('ringtone') || 'https://assets.mixkit.co/active_storage/sfx/1359/1359-84.wav';
-  if (notif) notif.src = localStorage.getItem('notif_sound') || 'https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav';
+  // Рингтон и звук уведомлений: если юзер выбрал свой — берём его из localStorage,
+  // если нет — берём стандартный звук по умолчанию. Если стандартный звук не
+  // догрузится (нет интернета в момент загрузки) — используем синтезированный
+  // сигнал (playPing/playRingLoop) как гарантированно рабочий офлайн-фолбэк.
+  window.__ringOk = true; window.__notifOk = true;
+  if (ring) {
+    ring.src = localStorage.getItem('ringtone') || 'https://assets.mixkit.co/active_storage/sfx/1359/1359-84.wav';
+    ring.onerror = () => { window.__ringOk = false; };
+  }
+  if (notif) {
+    notif.src = localStorage.getItem('notif_sound') || 'https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav';
+    notif.onerror = () => { window.__notifOk = false; };
+  }
+}
+
+// Синтезированный (гарантированно офлайн) рингтон-паттерн — используется, если
+// сохранённый/стандартный звук по какой-то причине не смог загрузиться.
+let __ringLoopTimer = null;
+function playRingLoopFallback() {
+  stopRingLoopFallback();
+  const beep = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0.09, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      o.start(); o.stop(ctx.currentTime + 0.35);
+      o.onended = () => ctx.close();
+    } catch(e) {}
+  };
+  beep();
+  __ringLoopTimer = setInterval(beep, 1000);
+}
+function stopRingLoopFallback() {
+  if (__ringLoopTimer) { clearInterval(__ringLoopTimer); __ringLoopTimer = null; }
 }
 
 function unlockAudio() {
@@ -157,7 +210,7 @@ function doRegister() {
   document.getElementById('r-pass2').value = '';
 }
 
-socket.on('authError', m => toast(m || '❌ Ошибка'));
+socket.on('authError', m => { hideSessionSplash(); toast(m || '❌ Ошибка'); });
 socket.on('profileError', m => toast(m || '❌ Ошибка обновления профиля'));
 
 socket.on('authSuccess', data => {
@@ -393,17 +446,17 @@ function menuProfile() {
   if (!curPartner) return;
   openPeerProfile();
 }
-function menuClear() {
+async function menuClear() {
   hideChatMenu();
   if (!curChat) return;
-  if (confirm('Очистить переписку? Сообщения удалятся у обоих.')) {
+  if (await askConfirm('Сообщения удалятся у обоих собеседников без возможности восстановления.', 'Очистить переписку?', 'Очистить')) {
     socket.emit('clearChat', { chatId: curChat });
   }
 }
-function menuDelete() {
+async function menuDelete() {
   hideChatMenu();
   if (!curChat) return;
-  if (confirm('Удалить этот чат из списка?')) {
+  if (await askConfirm('Чат пропадёт из списка. История переписки сохранится и появится снова при новом сообщении.', 'Удалить чат из списка?', 'Удалить')) {
     socket.emit('deleteChat', { chatId: curChat });
     activeChats = activeChats.filter(u => u !== curPartner);
     curChat = ''; curPartner = '';
@@ -473,7 +526,7 @@ socket.on('newMessage', ({ chatId: cid, msg }) => {
     renderMsgs();
   } else if (msg.from !== me) {
     unread[cid] = (unread[cid] || 0) + 1;
-    if (soundOn()) document.getElementById('snd-notif').play().catch(() => {});
+    if (soundOn()) { if (window.__notifOk === false) playPing(); else document.getElementById('snd-notif').play().catch(() => playPing()); }
     vib(180);
     notifyLocal(displayNameOf(msg.from), msg.text ? msg.text.slice(0, 100) : '📎 Медиа');
   }
@@ -587,8 +640,9 @@ function renderMsgs() {
   box.scrollTop = box.scrollHeight;
 }
 
-function delMsg(id) {
-  if (!curChat || !confirm('Удалить сообщение?')) return;
+async function delMsg(id) {
+  if (!curChat) return;
+  if (!(await askConfirm('Сообщение удалится без возможности восстановления.', 'Удалить сообщение?', 'Удалить'))) return;
   socket.emit('deleteMessage', { chatId: curChat, msgId: id });
 }
 function setReply(id, text) {
@@ -817,7 +871,7 @@ socket.on('devicesList', list => {
   });
 });
 
-function kickDev(id) { if (confirm('Удалить сессию?')) socket.emit('kickDevice', id); }
+async function kickDev(id) { if (await askConfirm('Устройство будет разлогинено.', 'Удалить сессию?', 'Удалить')) socket.emit('kickDevice', id); }
 
 socket.on('kickMe', () => {
   stopHeartbeat();
@@ -825,8 +879,25 @@ socket.on('kickMe', () => {
   setTimeout(() => { localStorage.removeItem('u'); localStorage.removeItem('did'); location.reload(); }, 1500);
 });
 
-function doLogout() {
-  if (!confirm('Выйти из аккаунта?')) return;
+// ─── Стилизованное окно подтверждения (замена системного confirm()) ───
+let __confirmResolve = null;
+function askConfirm(text, title = 'Подтверждение', okLabel = 'Ок') {
+  return new Promise(resolve => {
+    __confirmResolve = resolve;
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-text').textContent = text;
+    document.getElementById('confirm-ok-btn').textContent = okLabel;
+    document.getElementById('modal-confirm').classList.remove('hidden');
+  });
+}
+function closeConfirmModal(result) {
+  document.getElementById('modal-confirm').classList.add('hidden');
+  if (__confirmResolve) { __confirmResolve(result); __confirmResolve = null; }
+}
+
+async function doLogout() {
+  const ok = await askConfirm('Выйти из аккаунта? Понадобится войти заново.', 'Выйти из аккаунта', 'Выйти');
+  if (!ok) return;
   stopHeartbeat();
   socket.emit('logout');
   localStorage.removeItem('u'); localStorage.removeItem('did');
@@ -936,9 +1007,14 @@ function toast(text, ms) {
 function openAdmin() {
   if (!iAmAdmin) return;
   document.getElementById('modal-admin').classList.remove('hidden');
-  socket.emit('adminGetUsers'); socket.emit('adminGetStats');
+  socket.emit('adminGetUsers'); socket.emit('adminGetStats'); socket.emit('adminGetFindableState');
 }
 function closeAdmin() { document.getElementById('modal-admin').classList.add('hidden'); }
+
+socket.on('adminFindableState', v => {
+  const el = document.getElementById('admin-findable-toggle');
+  if (el) el.checked = !!v;
+});
 
 socket.on('adminStats', s => {
   const el = document.getElementById('admin-stats'); if (!el) return;
@@ -986,8 +1062,8 @@ socket.on('adminUsersList', list => {
 });
 
 function adminDo(ev, u) { socket.emit(ev, u); }
-function adminDel(u) { if (confirm(`Удалить @${u}?`)) socket.emit('adminDeleteUser', u); }
-function adminDelGroup(id) { if (confirm('Удалить группу?')) socket.emit('adminDeleteGroup', id); }
+async function adminDel(u) { if (await askConfirm(`Аккаунт @${u} и его переписки будут удалены без возможности восстановления.`, `Удалить @${u}?`, 'Удалить')) socket.emit('adminDeleteUser', u); }
+async function adminDelGroup(id) { if (await askConfirm('Группа и её история будут удалены безвозвратно.', 'Удалить группу?', 'Удалить')) socket.emit('adminDeleteGroup', id); }
 function adminResetPass(u) {
   const p = prompt(`Новый пароль для @${u}:`);
   if (!p || p.length < 4) return toast('❌ Минимум 4 символа');
@@ -999,10 +1075,10 @@ function adminBc() {
   socket.emit('adminBroadcast', t);
   document.getElementById('admin-bc').value = '';
 }
-function adminClearChat() {
+async function adminClearChat() {
   const id = (document.getElementById('admin-clearchat-id').value || '').trim();
   if (!id) return toast('❌ Введите ID чата');
-  if (confirm(`Очистить чат "${id}"?`)) socket.emit('adminClearChat', { chatId: id });
+  if (await askConfirm(`Все сообщения в чате "${id}" будут удалены безвозвратно.`, 'Очистить чат?', 'Очистить')) socket.emit('adminClearChat', { chatId: id });
 }
 socket.on('adminLog', entries => {
   const el = document.getElementById('admin-log'); if (!el) return;
@@ -1077,7 +1153,7 @@ socket.on('incomingCall', data => {
   setAva('call-ava', data.fromAvatar || '', data.fromDisplayName || data.from);
 
   const ring = document.getElementById('snd-ringtone');
-  if (ring && soundOn()) ring.play().catch(() => {});
+  if (soundOn()) { if (window.__ringOk === false) playRingLoopFallback(); else ring.play().catch(() => playRingLoopFallback()); }
   // Вибрация при входящем звонке — повторяющийся паттерн
   if (vibOn() && navigator.vibrate) {
     try {
@@ -1085,7 +1161,22 @@ socket.on('incomingCall', data => {
     } catch(e) {}
   }
   notifyLocal((data.fromDisplayName || data.from) + ' звонит', data.callType === 'video' ? '📹 Видеозвонок' : '📞 Аудиозвонок');
+
+  // Полноэкранный вызов, как у обычного телефонного звонка — работает
+  // даже если приложение свёрнуто или экран заблокирован.
+  if (isNative && window.Capacitor && window.Capacitor.Plugins.CallPlugin) {
+    window.Capacitor.Plugins.CallPlugin.showFullScreenCall({
+      name: data.fromDisplayName || data.from,
+      type: data.callType || 'audio'
+    }).catch(() => {});
+  }
 });
+
+function dismissCallNotification() {
+  if (isNative && window.Capacitor && window.Capacitor.Plugins.CallPlugin) {
+    window.Capacitor.Plugins.CallPlugin.dismissCallNotification().catch(() => {});
+  }
+}
 
 async function startCall(to, withVideo) {
   if (!to) { if (!curPartner) return toast('⚠️ Выберите контакт'); to = curPartner; }
@@ -1127,8 +1218,10 @@ async function startCall(to, withVideo) {
 }
 
 async function acceptCall() {
+  dismissCallNotification();
   const ring = document.getElementById('snd-ringtone');
   if (ring) { ring.pause(); ring.currentTime = 0; }
+  stopRingLoopFallback();
   if (vibOn() && navigator.vibrate) try { navigator.vibrate(0); } catch(e) {}
   document.getElementById('btn-accept').style.display = 'none';
   document.getElementById('call-status').innerText = '🔗 Соединение...';
@@ -1182,10 +1275,77 @@ function endCall() {
   cleanCall();
 }
 
+// ─── Свайп вверх для приёма/отклонения звонка ───
+function initCallSwipeGestures() {
+  setupSwipeCallButton('btn-accept', 'accept-hint', () => acceptCall());
+  setupSwipeCallButton('btn-end', 'decline-hint', () => endCall());
+}
+
+function setupSwipeCallButton(btnId, hintId, action) {
+  const btn = document.getElementById(btnId);
+  const hint = document.getElementById(hintId);
+  if (!btn) return;
+  const THRESHOLD = 60, MAX_DRAG = 100;
+  let startY = 0, dragging = false, dy = 0;
+
+  function isIncoming() {
+    const acceptBtn = document.getElementById('btn-accept');
+    return acceptBtn && acceptBtn.style.display !== 'none';
+  }
+  function reset() {
+    btn.style.transition = 'transform .25s cubic-bezier(.34,1.56,.64,1), opacity .25s';
+    btn.style.transform = ''; btn.style.opacity = '';
+    if (hint) { hint.style.display = 'none'; hint.style.opacity = ''; }
+  }
+  function onDown(e) {
+    // Кнопка завершения активного (не входящего) звонка — обычный тап, без свайпа
+    if (btnId === 'btn-end' && !isIncoming()) return;
+    dragging = true; dy = 0;
+    startY = e.touches ? e.touches[0].clientY : e.clientY;
+    btn.style.transition = 'none';
+    if (hint) hint.style.display = 'block';
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    const y = e.touches ? e.touches[0].clientY : e.clientY;
+    dy = Math.max(0, Math.min(MAX_DRAG, startY - y));
+    btn.style.transform = `translateY(${-dy}px) scale(${1 + dy / MAX_DRAG * 0.15})`;
+    btn.style.opacity = String(1 - dy / MAX_DRAG * 0.4);
+    if (hint) hint.style.opacity = String(Math.max(0, 1 - dy / THRESHOLD));
+  }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    if (dy >= THRESHOLD) {
+      btn.style.transition = 'transform .2s ease-out, opacity .2s ease-out';
+      btn.style.transform = `translateY(-${MAX_DRAG + 40}px) scale(0.7)`;
+      btn.style.opacity = '0';
+      if (hint) hint.style.display = 'none';
+      setTimeout(() => { action(); reset(); }, 160);
+    } else {
+      reset();
+    }
+  }
+  btn.addEventListener('touchstart', onDown, { passive: true });
+  btn.addEventListener('touchmove', onMove, { passive: true });
+  btn.addEventListener('touchend', onUp);
+  btn.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  // Клик без движения (например мышью на десктопе, тестирование):
+  // для входящего звонка требуем именно свайп, обычный клик не засчитывается.
+  btn.addEventListener('click', e => {
+    if (btnId === 'btn-accept' && isIncoming()) e.preventDefault();
+    if (btnId === 'btn-end' && isIncoming()) e.preventDefault();
+  });
+}
+
 function cleanCall() {
   clearTimeout(callTO); callTO = null;
+  dismissCallNotification();
   const ring = document.getElementById('snd-ringtone');
   if (ring) { ring.pause(); ring.currentTime = 0; }
+  stopRingLoopFallback();
   if (vibOn() && navigator.vibrate) try { navigator.vibrate(0); } catch(e) {}
   if (pc) { pc.close(); pc = null; }
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }

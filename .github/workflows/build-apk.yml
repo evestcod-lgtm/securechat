@@ -76,6 +76,15 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
+      - name: Generate app icon (if resources/icon.png provided)
+        run: |
+          if [ -f "resources/icon.png" ]; then
+            echo "→ Найден resources/icon.png, генерирую иконку приложения"
+            npx @capacitor/assets generate --android --iconBackgroundColor '#111111' --iconBackgroundColorDark '#111111' || echo "⚠️ Не удалось сгенерировать иконку, соберётся со стандартной"
+          else
+            echo "ℹ️ resources/icon.png не найден — используется стандартная иконка Capacitor. Положи свою картинку в resources/icon.png, чтобы заменить."
+          fi
+
       - name: Sync Capacitor
         run: npx cap sync android
 

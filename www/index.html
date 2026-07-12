@@ -17,7 +17,11 @@
 
 <!-- ЭКРАН ВХОДА -->
 <div id="login-screen" class="screen active">
-  <div class="auth-box">
+  <div id="session-check-splash" class="hidden" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;height:100%;width:100%;">
+    <div class="spinner"></div>
+    <p style="color:var(--fg2);font-size:13px;">Вход в аккаунт...</p>
+  </div>
+  <div class="auth-box" id="auth-box-form">
     <div class="auth-head">
       <span class="auth-logo">🔐</span>
       <h1>SecureChat</h1>
@@ -28,12 +32,12 @@
       <button class="tab" onclick="switchTab('reg')">Регистрация</button>
     </div>
     <div id="tab-login">
-      <div class="field"><label>Логин</label><input id="l-user" type="text" placeholder="юзернейм" autocomplete="off"></div>
+      <div class="field"><label>Логин</label><input id="l-user" type="text" placeholder="юзернейм" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
       <div class="field"><label>Пароль</label><input id="l-pass" type="password" placeholder="пароль"></div>
       <button class="btn-prim" onclick="doLogin()">Войти →</button>
     </div>
     <div id="tab-reg" class="hidden">
-      <div class="field"><label>Логин</label><input id="r-user" type="text" placeholder="a-z,0-9,_ (3-20)" autocomplete="off"><small>Только латинские буквы, цифры, _</small></div>
+      <div class="field"><label>Логин</label><input id="r-user" type="text" placeholder="a-z,0-9,_ (3-20)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"><small>Только латинские буквы, цифры, _</small></div>
       <div class="field"><label>Пароль</label><input id="r-pass" type="password" placeholder="минимум 4 символа"></div>
       <div class="field"><label>Подтверждение</label><input id="r-pass2" type="password" placeholder="повторите пароль"></div>
       <button class="btn-prim" onclick="doRegister()">Создать аккаунт →</button>
@@ -55,7 +59,7 @@
       <button class="ico-btn" onclick="openSettings()" title="Настройки">⚙️</button>
     </div>
     <div class="search-bar">
-      <input id="search-inp" placeholder="🔍 Поиск по юзернейму..." autocomplete="off">
+      <input id="search-inp" placeholder="🔍 Поиск по юзернейму..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text" type="text">
       <button class="search-btn" onclick="doSearch()">Найти</button>
     </div>
     <div id="search-res"></div>
@@ -94,7 +98,7 @@
     <div class="input-bar" id="input-bar" style="display:none">
       <button class="ico-btn" onclick="document.getElementById('file-inp').click()" title="Фото/видео">📎</button>
       <input type="file" id="file-inp" accept="image/*,video/*" style="display:none" onchange="handleFile()">
-      <input class="msg-inp" id="msg-inp" placeholder="Сообщение..." autocomplete="off">
+      <input class="msg-inp" id="msg-inp" placeholder="Сообщение..." autocomplete="off" autocorrect="off" spellcheck="false">
       <button class="send-btn" onclick="sendMsg()">➤</button>
     </div>
   </div>
@@ -128,8 +132,14 @@
     <p class="call-login" id="call-login">—</p>
     <p class="call-timer hidden" id="call-timer">00:00</p>
     <div class="call-btns">
-      <button id="btn-accept" class="call-circle accept" onclick="acceptCall()" style="display:none" title="Принять"></button>
-      <button id="btn-end" class="call-circle decline" onclick="endCall()" title="Завершить"></button>
+      <div class="call-swipe-wrap">
+        <button id="btn-accept" class="call-circle accept" style="display:none" title="Принять (свайп вверх)"></button>
+        <span id="accept-hint" class="swipe-hint" style="display:none">↑ Свайп вверх, чтобы принять</span>
+      </div>
+      <div class="call-swipe-wrap">
+        <button id="btn-end" class="call-circle decline" title="Завершить"></button>
+        <span id="decline-hint" class="swipe-hint" style="display:none">↑ Свайп вверх, чтобы отклонить</span>
+      </div>
     </div>
     <div class="call-btns2">
       <button id="btn-mic" class="call-circle toggle on" onclick="toggleMic()" title="Микрофон">🎤</button>
@@ -216,6 +226,18 @@
 </div>
 
 <!-- СОЗДАТЬ ГРУППУ -->
+<!-- УНИВЕРСАЛЬНОЕ ОКНО ПОДТВЕРЖДЕНИЯ (вместо системного confirm()) -->
+<div id="modal-confirm" class="modal hidden">
+  <div class="modal-box confirm-box">
+    <div class="modal-head"><h2 id="confirm-title">Подтверждение</h2></div>
+    <div class="modal-body"><p id="confirm-text" style="color:var(--fg1);font-size:14px;line-height:1.5;"></p></div>
+    <div class="modal-foot" style="display:flex;gap:10px;">
+      <button class="btn-sec" style="flex:1" onclick="closeConfirmModal(false)">Отмена</button>
+      <button class="btn-prim" id="confirm-ok-btn" style="flex:1" onclick="closeConfirmModal(true)">Ок</button>
+    </div>
+  </div>
+</div>
+
 <div id="modal-group" class="modal hidden">
   <div class="modal-box">
     <div class="modal-head"><h2>👥 Новая группа</h2><button onclick="closeCreateGroup()">✕</button></div>
@@ -235,6 +257,13 @@
       <section>
         <h3>📊 Статистика</h3>
         <div id="admin-stats" class="stat-grid"></div>
+      </section>
+      <section>
+        <h3>🔎 Видимость админа в поиске</h3>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+          <input type="checkbox" id="admin-findable-toggle" onchange="socket.emit('adminSetFindable', this.checked)">
+          <span style="color:var(--fg1);font-size:14px;">Разрешить находить @admin через поиск другим пользователям</span>
+        </label>
       </section>
       <section>
         <h3>📢 Объявление всем</h3>
