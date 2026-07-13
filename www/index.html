@@ -63,6 +63,10 @@
       <button class="search-btn" onclick="doSearch()">Найти</button>
     </div>
     <div id="search-res"></div>
+    <div class="chat-item" onclick="openFavorites()" style="border-bottom:1px solid var(--bg2);">
+      <div class="avatar sm" style="background:linear-gradient(135deg,#f59e0b,#ef4444);display:flex;align-items:center;justify-content:center;">⭐</div>
+      <div class="ci-info"><b>Избранное</b><div class="ci-sub">Заметки для себя</div></div>
+    </div>
     <div class="section-label">Сообщения</div>
     <div id="chat-list"></div>
     <div class="section-label" style="margin-top:6px">Группы</div>
@@ -235,6 +239,14 @@
       <button class="btn-sec" style="flex:1" onclick="closeConfirmModal(false)">Отмена</button>
       <button class="btn-prim" id="confirm-ok-btn" style="flex:1" onclick="closeConfirmModal(true)">Ок</button>
     </div>
+  </div>
+</div>
+
+<!-- ПЕРЕСЛАТЬ СООБЩЕНИЕ -->
+<div id="modal-forward" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h2>➡️ Переслать</h2><button onclick="closeForwardPicker()">✕</button></div>
+    <div class="modal-body"><div id="forward-list"></div></div>
   </div>
 </div>
 

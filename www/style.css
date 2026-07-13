@@ -226,6 +226,9 @@ button{font-family:inherit;cursor:pointer;}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(8px);padding:16px;}
 .modal-box{width:100%;max-width:520px;max-height:90vh;background:var(--bg1);border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5);}
 .confirm-box{max-width:340px;}
+.pin-tag{font-size:11px;color:var(--ac);font-weight:700;margin-bottom:3px;}
+.pinned-banner{display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--bg1);border-bottom:1px solid var(--bg2);font-size:13px;color:var(--fg1);}
+.pinned-banner span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .spinner{width:34px;height:34px;border:3px solid var(--bg3);border-top-color:var(--ac);border-radius:50%;animation:spin .7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
 .modal-box.wide{max-width:680px;}

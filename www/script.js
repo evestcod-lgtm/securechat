@@ -30,6 +30,7 @@ function initApp() {
   loadPrefsUI();
   initResizer();
   initCallSwipeGestures();
+  if (isNative) initServerUrlWatcher();
   initAudio();
   unlockAudio();
   setupKeyboard();
@@ -175,6 +176,7 @@ function setupKeyboard() {
     msgInp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); sendMsg(); } });
     msgInp.addEventListener('input', () => {
       if (!curChat) return;
+      saveDraft(curChat, msgInp.value.trim());
       socket.emit('typing', { chatId: curChat, isTyping: true });
       clearTimeout(typTimer);
       typTimer = setTimeout(() => socket.emit('typing', { chatId: curChat, isTyping: false }), 1500);
@@ -310,19 +312,40 @@ socket.on('searchResult', results => {
 // ─── БОКОВАЯ ПАНЕЛЬ ───
 function renderSidebar() { renderChats(); renderGroups(); }
 
+// ─── Закрепление чатов и черновики (хранятся локально на устройстве) ───
+function getPinned() { try { return JSON.parse(localStorage.getItem('pinned_chats') || '[]'); } catch(e) { return []; } }
+function setPinned(arr) { localStorage.setItem('pinned_chats', JSON.stringify(arr)); }
+function togglePin(cid) {
+  let p = getPinned();
+  p = p.includes(cid) ? p.filter(x => x !== cid) : [...p, cid];
+  setPinned(p);
+  renderSidebar();
+}
+function isPinned(cid) { return getPinned().includes(cid); }
+
+function getDraft(cid) { return localStorage.getItem('draft_' + cid) || ''; }
+function saveDraft(cid, text) {
+  if (text) localStorage.setItem('draft_' + cid, text);
+  else localStorage.removeItem('draft_' + cid);
+}
+
 function renderChats() {
   const list = document.getElementById('chat-list');
   list.innerHTML = '';
-  if (!activeChats.length) {
+  const others = activeChats.filter(u => u !== me);
+  if (!others.length) {
     list.innerHTML = '<div class="empty-hint">Нет переписок.<br>Найдите контакт выше 🔍</div>';
     return;
   }
-  const data = activeChats.map(u => {
+  const pinned = getPinned();
+  const data = others.map(u => {
     const cid = chatId(me, u);
     const m = msgs[cid] || [];
     const last = m[m.length - 1];
+    const draft = getDraft(cid);
     let lastTxt = 'Нет сообщений';
-    if (last) lastTxt = last.text ? esc(last.text.slice(0, 38)) : (last.mediaType === 'video' ? '🎬 Видео' : '📸 Фото');
+    if (draft) lastTxt = `<span style="color:var(--err)">Черновик:</span> ${esc(draft.slice(0, 30))}`;
+    else if (last) lastTxt = last.text ? esc(last.text.slice(0, 38)) : (last.mediaType === 'video' ? '🎬 Видео' : '📸 Фото');
     const f = allUsers.find(x => x.name === u);
     return {
       u, cid, lastTxt,
@@ -330,9 +353,10 @@ function renderChats() {
       unread: unread[cid] || 0,
       avatar: f ? f.avatar : '',
       dn: f ? f.displayName : u,
-      online: onlineVisible.includes(u)
+      online: onlineVisible.includes(u),
+      pinned: pinned.includes(cid)
     };
-  }).sort((a, b) => b.unread - a.unread);
+  }).sort((a, b) => (b.pinned - a.pinned) || (b.unread - a.unread));
 
   data.forEach(c => {
     const div = document.createElement('div');
@@ -341,12 +365,17 @@ function renderChats() {
       <div class="avatar sm" id="ci-${esc(c.u)}"></div>
       <div class="ci-info">
         <div class="ci-top">
-          <b>${esc(c.dn)} ${c.online ? '<span class="dot-online"></span>' : ''}</b>
+          <b>${c.pinned ? '📌 ' : ''}${esc(c.dn)} ${c.online ? '<span class="dot-online"></span>' : ''}</b>
           ${c.unread > 0 ? `<span class="badge">${c.unread}</span>` : `<span class="last-time">${esc(c.lastTime)}</span>`}
         </div>
         <div class="ci-sub">${c.lastTxt}</div>
       </div>`;
     div.onclick = () => openChat(c.cid, c.u);
+    div.oncontextmenu = e => { e.preventDefault(); togglePin(c.cid); };
+    let pressTimer;
+    div.addEventListener('touchstart', () => { pressTimer = setTimeout(() => togglePin(c.cid), 550); });
+    div.addEventListener('touchend', () => clearTimeout(pressTimer));
+    div.addEventListener('touchmove', () => clearTimeout(pressTimer));
     list.appendChild(div);
     // Аватарка собеседника в списке чатов
     setAva('ci-' + c.u, c.avatar, c.dn);
@@ -378,7 +407,14 @@ function renderGroups() {
 }
 
 // ─── ОТКРЫТИЕ ЧАТА ───
+function openFavorites() {
+  if (!activeChats.includes(me)) activeChats.push(me);
+  openChat(chatId(me, me), me);
+  document.getElementById('ch-title').innerText = '⭐ Избранное';
+}
+
 function openChat(cid, partner) {
+  saveDraft(curChat, document.getElementById('msg-inp').value.trim());
   curChat = cid; curPartner = partner; curIsGroup = false;
   unread[cid] = 0;
   hideChatMenu();
@@ -393,6 +429,7 @@ function openChat(cid, partner) {
   document.getElementById('btn-acall').style.display = 'flex';
   document.getElementById('btn-vcall').style.display = 'flex';
   document.getElementById('btn-menu').style.display = 'flex';
+  document.getElementById('msg-inp').value = getDraft(cid);
   socket.emit('readChat', { chatId: cid });
   renderSidebar(); renderMsgs(); openMobile();
 }
@@ -505,6 +542,7 @@ function sendMsg() {
   if (!curChat) return toast('⚠️ Выберите чат');
   if (!text) return;
   inp.value = '';
+  saveDraft(curChat, '');
   socket.emit('sendMessage', { chatId: curChat, text, replyTo: replyId });
   cancelReply();
   playPing();
@@ -590,6 +628,7 @@ function renderMsgs() {
   const box = document.getElementById('msgs');
   box.innerHTML = '';
   const list = msgs[curChat] || [];
+  renderPinnedBanner(list);
   if (!list.length) { box.innerHTML = '<div class="empty-msgs">💬<br>Начните переписку</div>'; return; }
 
   list.forEach(m => {
@@ -621,9 +660,11 @@ function renderMsgs() {
     }
 
     const delBtn = isMine ? `<button class="msg-action-btn" onclick="delMsg('${ea(m.id)}')">🗑️</button>` : '';
+    const pinned = isPinnedMsg(curChat, m.id);
 
     wrap.innerHTML = `<div class="msg-bub">
       ${senderLine}
+      ${pinned ? '<div class="pin-tag">📌 Закреплено</div>' : ''}
       ${replyHtml}
       ${m.text ? `<div class="msg-text">${esc(m.text)}</div>` : ''}
       ${mediaHtml}
@@ -631,6 +672,8 @@ function renderMsgs() {
       <div class="msg-actions">
         <button class="msg-action-btn" onclick="setReply('${ea(m.id)}','${ea(m.text || '[медиа]')}')">↩️</button>
         <button class="msg-action-btn" onclick="pickReact('${ea(m.id)}')">😊</button>
+        <button class="msg-action-btn" onclick="openForwardPicker('${ea(m.id)}')">➡️</button>
+        <button class="msg-action-btn" onclick="togglePinMsg('${ea(m.id)}')">${pinned ? '📌' : '📍'}</button>
         ${delBtn}
       </div>
       ${reactHtml ? `<div class="react-bar">${reactHtml}</div>` : ''}
@@ -638,6 +681,62 @@ function renderMsgs() {
     box.appendChild(wrap);
   });
   box.scrollTop = box.scrollHeight;
+}
+
+// ─── Закреплённые сообщения (хранятся локально на устройстве, по чату) ───
+function getPinnedMsgs(cid) { try { return JSON.parse(localStorage.getItem('pinmsg_' + cid) || '[]'); } catch(e) { return []; } }
+function isPinnedMsg(cid, id) { return getPinnedMsgs(cid).includes(id); }
+function togglePinMsg(id) {
+  if (!curChat) return;
+  let p = getPinnedMsgs(curChat);
+  p = p.includes(id) ? p.filter(x => x !== id) : [...p, id];
+  localStorage.setItem('pinmsg_' + curChat, JSON.stringify(p));
+  renderMsgs();
+}
+function renderPinnedBanner(list) {
+  const old = document.getElementById('pinned-banner');
+  if (old) old.remove();
+  if (!curChat) return;
+  const pinnedIds = getPinnedMsgs(curChat);
+  if (!pinnedIds.length) return;
+  const lastPinned = list.filter(m => pinnedIds.includes(m.id)).pop();
+  if (!lastPinned) return;
+  const bar = document.createElement('div');
+  bar.id = 'pinned-banner';
+  bar.className = 'pinned-banner';
+  bar.innerHTML = `📌 <span>${esc((lastPinned.text || '[медиа]').slice(0, 60))}</span>`;
+  const chatHead = document.querySelector('.chat-header');
+  if (chatHead) chatHead.insertAdjacentElement('afterend', bar);
+}
+
+// ─── Пересылка сообщений ───
+let forwardMsgId = null;
+function openForwardPicker(id) {
+  forwardMsgId = id;
+  const wrap = document.getElementById('forward-list');
+  wrap.innerHTML = '';
+  activeChats.forEach(u => {
+    const f = allUsers.find(x => x.name === u);
+    const dn = f ? f.displayName : u;
+    const row = document.createElement('div');
+    row.className = 'chat-item';
+    row.innerHTML = `<div class="avatar sm" style="background:var(--ac)"></div><div class="ci-info"><b>${esc(dn)}</b></div>`;
+    row.onclick = () => doForward(u);
+    wrap.appendChild(row);
+  });
+  document.getElementById('modal-forward').classList.remove('hidden');
+}
+function closeForwardPicker() { document.getElementById('modal-forward').classList.add('hidden'); forwardMsgId = null; }
+function doForward(toUser) {
+  if (!forwardMsgId || !curChat) return;
+  const list = msgs[curChat] || [];
+  const m = list.find(x => x.id === forwardMsgId);
+  if (!m) return;
+  const targetChatId = chatId(me, toUser);
+  socket.emit('sendMessage', { chatId: targetChatId, text: (m.text ? '↪️ ' + m.text : ''), forwarded: true });
+  if (!activeChats.includes(toUser)) activeChats.push(toUser);
+  toast('✅ Переслано @' + toUser);
+  closeForwardPicker();
 }
 
 async function delMsg(id) {
@@ -1275,7 +1374,34 @@ function endCall() {
   cleanCall();
 }
 
-// ─── Свайп вверх для приёма/отклонения звонка ───
+// ─── Слежение за сменой адреса сервера ───
+// Если Termux перезапустил туннель и адрес поменялся — приложение сам это
+// заметит (проверка раз в 60 сек) и перезапустится САМО, не закрываясь,
+// с коротким экраном загрузки, вместо того чтобы просто "повиснуть" без связи.
+function initServerUrlWatcher() {
+  setInterval(async () => {
+    try {
+      const resp = await fetch(window.SERVER_URL_LOOKUP + '?t=' + Date.now());
+      if (!resp.ok) return;
+      const fresh = (await resp.text()).trim();
+      if (fresh && fresh.startsWith('http') && fresh !== SERVER_URL) {
+        showReloadSplash();
+        localStorage.setItem('server_url', fresh);
+        setTimeout(() => location.reload(), 900);
+      }
+    } catch (e) { /* нет сети в этот момент — просто попробуем на следующей проверке */ }
+  }, 60000);
+}
+function showReloadSplash() {
+  let el = document.getElementById('reload-splash');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'reload-splash';
+    el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:var(--bg0);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;';
+    el.innerHTML = '<div class="spinner"></div><p style="color:var(--fg2);font-size:13px;">Адрес сервера обновился, переподключаюсь...</p>';
+    document.body.appendChild(el);
+  }
+}
 function initCallSwipeGestures() {
   setupSwipeCallButton('btn-accept', 'accept-hint', () => acceptCall());
   setupSwipeCallButton('btn-end', 'decline-hint', () => endCall());
